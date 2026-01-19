@@ -1,0 +1,8 @@
+openai-whisper
+sounddevice
+numpy
+keyboard
+pyperclip
+wavio
+torch
+plyer
