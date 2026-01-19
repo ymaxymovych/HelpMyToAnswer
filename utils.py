@@ -12,7 +12,7 @@ def notify_user(title, message):
             notification.notify(
                 title=title,
                 message=message,
-                app_name="WhisperClip",
+                app_name="HelpMyToAnswer",
                 timeout=3
             )
         except Exception as e:
