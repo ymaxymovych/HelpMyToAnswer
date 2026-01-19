@@ -28,3 +28,6 @@ MANIFEST
 venv/
 env/
 ENV/
+
+# Temporary files
+4Delete/
