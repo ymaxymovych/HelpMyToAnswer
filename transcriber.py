@@ -4,6 +4,7 @@ import os
 
 import logging
 import shutil
+import sys
 
 class Transcriber:
     def __init__(self, model_size="base", device="auto"):
