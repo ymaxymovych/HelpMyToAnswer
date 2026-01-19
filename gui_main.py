@@ -15,80 +15,88 @@ from transcriber import Transcriber
 import keyboard
 
 # Configure Logging
-logging.basicConfig(filename='gui_app.log', level=logging.INFO, format='%(asctime)s %(message)s')
+log_file = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'debug_crash.log')
+logging.basicConfig(filename=log_file, level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
+
+def exception_hook(exctype, value, traceback):
+    logging.critical("Uncaught exception", exc_info=(exctype, value, traceback))
+    sys.__excepthook__(exctype, value, traceback)
+
+sys.excepthook = exception_hook
 
 class TranscriptionWorker(QThread):
-    # Signals to update UI
+    # Signals
     partial_result = pyqtSignal(str, str) # text, stability (h1, h3, h5)
+    status_update = pyqtSignal(str)       # For status labels/logs, NOT transcript
     finished = pyqtSignal()
 
-    def __init__(self, model_size="base", device="cpu"):
+    def __init__(self, model_size="base", device="cpu", input_device_index=None, language=None):
         super().__init__()
         self.is_running = False
-        self.recorder = AudioRecorder()
+        self.input_device_index = input_device_index
+        self.recorder = AudioRecorder(device_index=self.input_device_index)
         self.model_size = model_size
         self.device = device
+        self.language = language
         self.transcriber = None # Lazy load
 
     def run(self):
-        self.is_running = True
-        
-        # Initialize resources if needed (lazy load to keep UI responsive on start)
-        if not self.transcriber:
-            self.partial_result.emit("Loading Model...", "h1")
-            try:
-                self.transcriber = Transcriber(model_size=self.model_size, device=self.device)
-                self.partial_result.emit("Model Loaded. Ready.", "h5")
-            except Exception as e:
-                self.partial_result.emit(f"Error loading model: {e}", "h5")
-                return
-
-        # Start recording
-        self.recorder.start_recording()
-        self.partial_result.emit("Listening...", "h1")
-        
-        # Loop for "pseudo-streaming"
-        # In a real streaming scenario with standard Whisper, we would record chunks
-        # and transcribe context. For V2 demo, we will record until stop is requested,
-        # but to show updates we actually need a VAD loop or chunk loop.
-        # Given existing AudioRecorder records to file, we might need a slight adjustment
-        # or we just wait for STOP for the full text in this iteration.
-        
-        # To strictly follow TDD request for streaming without changing AudioRecorder too much:
-        # We will implement a loop that checks 'is_running'.
-        # Since AudioRecorder.start_recording() is non-blocking (it starts a thread),
-        # we can sleep here.
-        
-        while self.is_running:
-            time.sleep(0.1)
-            # In a full streaming implementation, we would access the recorder's stream here
-            # and run inference on partials. 
-            # For this version, we stick to the recording state. 
+        try:
+            self.is_running = True
             
-        # Stop and Transcribe Final
-        audio_path = self.recorder.stop_recording()
-        if audio_path:
-            self.partial_result.emit("Transcribing...", "h3")
+            # Initialize resources if needed
+            if not self.transcriber:
+                self.status_update.emit("Loading Model...")
+                try:
+                    self.transcriber = Transcriber(model_size=self.model_size, device=self.device)
+                    self.status_update.emit("Model Loaded. Ready.")
+                except Exception as e:
+                    logging.error(f"Model load error: {e}")
+                    self.status_update.emit(f"Error loading model: {e}")
+                    return
+
+            # Start recording
             try:
-                text = self.transcriber.transcribe(audio_path)
-                if text:
-                    self.partial_result.emit(text, "h5")
-                else:
-                    self.partial_result.emit("No speech detected.", "h5")
+                self.recorder.start_recording()
+                self.status_update.emit("Listening...")
             except Exception as e:
-                 self.partial_result.emit(f"Error: {e}", "h5")
+                 logging.error(f"Recording start error: {e}")
+                 self.status_update.emit(f"Mic Error: {e}")
+                 return
+            
+            while self.is_running:
+                time.sleep(0.1)
+                
+            # Stop and Transcribe Final
+            try:
+                audio_path = self.recorder.stop_recording()
+                if audio_path:
+                    self.status_update.emit("Transcribing...")
+                    # Update UI to show we are processing (optional visual cue in transcript if needed, but keeping clean for now)
+                    text = self.transcriber.transcribe(audio_path, language=self.language)
+                    if text:
+                        self.partial_result.emit(text, "h5")
+                        self.status_update.emit("Done.")
+                    else:
+                        self.status_update.emit("No speech detected.")
+                else:
+                    logging.warning("No audio path returned from stop_recording")
+            except Exception as e:
+                 logging.error(f"Transcribe/Stop error: {e}", exc_info=True)
+                 self.status_update.emit(f"Error: {e}")
         
-        self.finished.emit()
-
-    def stop(self):
-        self.is_running = False
-
+        except Exception as e:
+            logging.critical(f"Worker thread crash: {e}", exc_info=True)
+        finally:
+            self.finished.emit()
+            
+    # ... rest of worker ...
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("HelpMyToAnswer V2")
-        self.resize(600, 700)
+        self.resize(800, 700)
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint)
         
         # Backend Worker
@@ -108,6 +116,23 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("■ STOP")
         self.status_label.setStyleSheet("color: red; font-weight: bold;")
         
+        # Audio Input Selection
+        self.mic_combo = QComboBox()
+        self.mic_combo.setToolTip("Select Microphone")
+        self.mic_combo.addItem("Default Mic", None)
+        # Populate devices
+        try:
+            devices = AudioRecorder.get_input_devices()
+            for dev in devices:
+                self.mic_combo.addItem(f"{dev['name']}", dev['index'])
+        except:
+            pass
+            
+        self.model_combo = QComboBox()
+        self.model_combo.addItems(["Tiny", "Base", "Small", "Medium"])
+        self.model_combo.setCurrentText("Base")
+        self.model_combo.setToolTip("Model Size (Small/Medium = Better Quality, Slower)")
+
         self.lang_combo = QComboBox()
         self.lang_combo.addItems(["Auto", "UK", "EN", "RU"])
         
@@ -118,6 +143,8 @@ class MainWindow(QMainWindow):
 
         top_panel.addWidget(self.status_label)
         top_panel.addWidget(QLabel("|")) 
+        top_panel.addWidget(self.mic_combo)
+        top_panel.addWidget(self.model_combo)
         top_panel.addWidget(self.lang_combo)
         top_panel.addWidget(self.mode_combo)
         top_panel.addStretch()
@@ -213,11 +240,36 @@ class MainWindow(QMainWindow):
         
         self.transcript_area.clear()
         
+        # Get selected mic index
+        selected_mic = self.mic_combo.currentData()
+        
+        # Get selected language
+        lang_text = self.lang_combo.currentText()
+        lang_map = {
+            "Auto": None,
+            "UK": "uk",
+            "EN": "en",
+            "RU": "ru"
+        }
+        selected_lang = lang_map.get(lang_text, None)
+        
+        # Get Model Size
+        self.model_size = self.model_combo.currentText().lower()
+
         # Start Worker
-        self.worker = TranscriptionWorker(device="cpu") # Force CPU or read config
+        self.worker = TranscriptionWorker(model_size=self.model_size, device="cpu", input_device_index=selected_mic, language=selected_lang)
         self.worker.partial_result.connect(self.update_transcript)
+        self.worker.status_update.connect(self.update_status) # New signal
         self.worker.finished.connect(self.on_worker_finished)
         self.worker.start()
+
+    def update_status(self, msg):
+        self.status_label.setText(msg)
+        # Optional: Flash color if error
+        if "Error" in msg:
+            self.status_label.setStyleSheet("color: orange; font-weight: bold;")
+        else:
+             self.status_label.setStyleSheet("color: #00ff00; font-weight: bold;")
 
     def stop_recording(self):
         self.is_recording = False
