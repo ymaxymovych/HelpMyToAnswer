@@ -4,17 +4,26 @@ import time
 import logging
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QTextEdit, QLabel, QPushButton, QComboBox, QCheckBox, 
-                             QTabWidget, QSplitter)
+                             QTabWidget, QSplitter, QListWidget, QListWidgetItem)
 from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QPalette, QAction
 
 # Import our existing backend modules
-# We assume audio_recorder.py and transcriber.py exist and work
 from audio_recorder import AudioRecorder
 from transcriber import Transcriber
+from history_manager import HistoryManager
 import keyboard
+import os 
+import sys
 
-# Configure Logging
+log_file = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'debug_crash.log')
+logging.basicConfig(filename=log_file, level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
+
+def exception_hook(exctype, value, traceback):
+    logging.critical("Uncaught exception", exc_info=(exctype, value, traceback))
+    sys.__excepthook__(exctype, value, traceback)
+
+sys.excepthook = exception_hook
 log_file = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'debug_crash.log')
 logging.basicConfig(filename=log_file, level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
 
@@ -102,6 +111,7 @@ class MainWindow(QMainWindow):
         # Backend Worker
         self.worker = None
         self.is_recording = False
+        self.history_manager = HistoryManager()
         
         # Main Layout
         central_widget = QWidget()
@@ -187,9 +197,17 @@ class MainWindow(QMainWindow):
         self.tab_b = QTextEdit()
         self.tab_c = QTextEdit()
         
+        # History Tab
+        self.history_tab = QListWidget()
+        self.history_tab.itemDoubleClicked.connect(self.on_history_item_double_clicked)
+        
         self.tabs.addTab(self.tab_a, "Variant A (Formal)")
         self.tabs.addTab(self.tab_b, "Variant B (Casual)")
         self.tabs.addTab(self.tab_c, "Variant C (Short)")
+        self.tabs.addTab(self.history_tab, "History")
+        
+        # Load History
+        self.refresh_history_ui()
         
         main_layout.addWidget(self.tabs, stretch=1)
 
@@ -283,6 +301,29 @@ class MainWindow(QMainWindow):
 
     def on_worker_finished(self):
         self.worker = None
+        # Save to history if we have text
+        current_text = self.transcript_area.toPlainText().strip()
+        if current_text:
+             self.history_manager.add_entry(current_text)
+             self.refresh_history_ui()
+    
+    def refresh_history_ui(self):
+        self.history_tab.clear()
+        entries = self.history_manager.get_history()
+        for entry in entries:
+            # Format: [Time] Snippet...
+            snippet = (entry['text'][:50] + '...') if len(entry['text']) > 50 else entry['text']
+            label = f"[{entry['timestamp']}] {snippet}"
+            item = QListWidgetItem(label)
+            item.setToolTip(entry['text']) # Full text on hover
+            item.setData(Qt.ItemDataRole.UserRole, entry['text']) # Store full text
+            self.history_tab.addItem(item)
+
+    def on_history_item_double_clicked(self, item):
+        full_text = item.data(Qt.ItemDataRole.UserRole)
+        self.transcript_area.setText(full_text)
+        self.update_status("Loaded from History")
+        # Also switch to Variant A tab if needed, or just let user see it in transcript area
         # self.status_label.setText("Done")
 
     def copy_to_clipboard(self):
