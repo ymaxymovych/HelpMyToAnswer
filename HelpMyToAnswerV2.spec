@@ -3,17 +3,19 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
-hiddenimports = ['whisper', 'pystray', 'PIL', 'PIL.Image', 'PIL.ImageDraw']
+hiddenimports = ['whisper', 'pystray', 'PIL', 'PyQt6.QtWidgets', 'PyQt6.QtCore', 'PyQt6.QtGui']
 tmp_ret = collect_all('whisper')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('pystray')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('PIL')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('PyQt6')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
-    ['main.py'],
+    ['gui_main.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,
@@ -33,7 +35,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='HelpMyToAnswer',
+    name='HelpMyToAnswerV2',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

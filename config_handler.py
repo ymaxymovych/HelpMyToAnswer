@@ -7,7 +7,7 @@ DEFAULT_CONFIG = {
     "app_name": "HelpMyToAnswer",
     "whisper_model": "base",
     "device": "auto",  # options: "auto", "cpu", "cuda"
-    "use_ollama": true,
+    "use_ollama": True,
     "ollama_model": "llama3",
     "hotkey": "ctrl+alt+r"
 }

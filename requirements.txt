@@ -7,3 +7,6 @@ wavio
 torch
 plyer
 ollama
+pystray
+Pillow
+PyQt6
